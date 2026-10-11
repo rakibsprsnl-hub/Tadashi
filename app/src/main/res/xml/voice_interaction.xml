@@ -1,0 +1,4 @@
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.tadashi.assistant.TadashiSessionService"
+    android:recognitionService="com.tadashi.assistant.TadashiRecognitionService"
+    android:supportsAssist="true" />
