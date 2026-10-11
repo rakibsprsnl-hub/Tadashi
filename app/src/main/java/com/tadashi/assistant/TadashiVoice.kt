@@ -30,5 +30,5 @@ class TadashiRecognitionService : RecognitionService() {
         listener?.error(android.speech.SpeechRecognizer.ERROR_CLIENT)
     }
     override fun onCancel(listener: Callback?) {}
-    override fun onStop(listener: Callback?) {}
+    override fun onStopListening(listener: Callback?) {}
 }
