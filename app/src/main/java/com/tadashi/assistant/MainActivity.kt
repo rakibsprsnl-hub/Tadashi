@@ -19,6 +19,7 @@ import java.util.zip.ZipInputStream
 
 class MainActivity : Activity() {
     private lateinit var geminiKey: EditText
+    private lateinit var geminiModel: EditText
     private lateinit var status: TextView
 
     private fun btn(t: String, f: () -> Unit) = Button(this).apply {
@@ -41,8 +42,14 @@ class MainActivity : Activity() {
             setText(Prefs.get(this@MainActivity, "gemini_key"))
         }
         col.addView(geminiKey)
-        col.addView(btn("Save key") {
+        col.addView(label("Gemini model name (change this if she says error 404)"))
+        geminiModel = EditText(this).apply {
+            setText(Prefs.get(this@MainActivity, "gemini_model").ifBlank { Brain.MODEL })
+        }
+        col.addView(geminiModel)
+        col.addView(btn("Save key and model") {
             Prefs.set(this, "gemini_key", geminiKey.text.toString().trim())
+            Prefs.set(this, "gemini_model", geminiModel.text.toString().trim())
             toast("Saved")
         })
 

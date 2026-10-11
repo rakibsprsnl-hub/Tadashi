@@ -16,13 +16,14 @@ object Agent {
             say("Please add your API key in the Tadashi app first.")
             return
         }
+        val model = Prefs.get(ctx, "gemini_model").ifBlank { Brain.MODEL }
         val msgs = JSONArray()
         val first = "Recent chat:\n" + memory.joinToString("\n") +
             "\n\nUser command: $command\n\nCurrent screen:\n" + screen()
         msgs.put(JSONObject().put("role", "user").put("content", first))
         var lastSpeech = ""
         for (step in 0 until 6) {
-            val raw = Brain.chat(key, msgs)
+            val raw = Brain.chat(key, model, msgs)
             msgs.put(JSONObject().put("role", "assistant").put("content", raw.ifBlank { "{}" }))
             val j = parse(raw)
             val speech = j.optString("speech")

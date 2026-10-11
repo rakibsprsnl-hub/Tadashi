@@ -7,7 +7,7 @@ import java.net.URL
 
 object Brain {
     // Free Gemini model. If Google retires it, change this name (see aistudio.google.com).
-    const val MODEL = "gemini-2.5-flash"
+    const val MODEL = "gemini-3-flash-preview"
 
     val SYSTEM = """
 You are Tadashi, a friendly voice assistant living inside the user's Android phone. You can answer any question (use Google search for current facts) and control the phone.
@@ -28,12 +28,12 @@ Action types:
 Rules: keep speech brief because it is spoken aloud. No markdown. For questions just answer in speech with an empty actions list. Before anything irreversible (payments, deleting things, posting publicly, messaging many people) ask the user to confirm by voice and do not act until they say yes. Never invent screen contents; use the screen text given.
 """.trimIndent()
 
-    fun chat(key: String, messages: JSONArray): String {
+    fun chat(key: String, model: String, messages: JSONArray): String {
         return try {
-            call(key, messages, true)
+            call(key, model, messages, true)
         } catch (e: Exception) {
             try {
-                call(key, messages, false)
+                call(key, model, messages, false)
             } catch (e2: Exception) {
                 JSONObject().put("speech", "Sorry, I could not reach my brain. " + (e2.message ?: "").take(100))
                     .put("actions", JSONArray()).put("done", true).toString()
@@ -41,7 +41,7 @@ Rules: keep speech brief because it is spoken aloud. No markdown. For questions 
         }
     }
 
-    private fun call(key: String, messages: JSONArray, search: Boolean): String {
+    private fun call(key: String, model: String, messages: JSONArray, search: Boolean): String {
         val contents = JSONArray()
         for (i in 0 until messages.length()) {
             val m = messages.getJSONObject(i)
@@ -54,7 +54,7 @@ Rules: keep speech brief because it is spoken aloud. No markdown. For questions 
             .put("contents", contents)
         if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
 
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"
         c.connectTimeout = 20000
