@@ -1,7 +1,5 @@
 package com.tadashi.assistant
 
-import ai.picovoice.porcupine.PorcupineManager
-import ai.picovoice.porcupine.PorcupineManagerCallback
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -18,15 +16,30 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.SpeechService
+import org.vosk.android.RecognitionListener as VoskListener
 import java.io.File
 import java.util.Locale
 import java.util.UUID
 
 class AssistantService : Service(), TextToSpeech.OnInitListener {
-    private var wake: PorcupineManager? = null
+    private var model: Model? = null
+    private var rec: Recognizer? = null
+    private var speech: SpeechService? = null
     private var tts: TextToSpeech? = null
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var busy = false
+    @Volatile private var loading = false
+
+    // Ways the offline recognizer may "hear" the name Tadashi (spaces removed). Add more if needed.
+    private val wakeWords = listOf(
+        "tadashi", "tadasi", "tadasha", "tadashe", "tadashy", "tadashee",
+        "tardashi", "tardyshe", "tardyshi", "todayshe", "todayshi", "todashi",
+        "tadash", "dashi", "tidashi", "tedashi"
+    )
 
     override fun onBind(i: Intent?): IBinder? = null
 
@@ -51,6 +64,7 @@ class AssistantService : Service(), TextToSpeech.OnInitListener {
         when (i?.action) {
             "LISTEN_NOW" -> main.post { onWake() }
             "TEXT" -> i.getStringExtra("text")?.let { runCommand(it) }
+            "RESTART_WAKE" -> main.post { stopWake(); startWake() }
         }
         return START_STICKY
     }
@@ -67,30 +81,62 @@ class AssistantService : Service(), TextToSpeech.OnInitListener {
         else startForeground(1, n)
     }
 
+    private val wakeListener = object : VoskListener {
+        override fun onPartialResult(h: String?) { check(h) }
+        override fun onResult(h: String?) { check(h) }
+        override fun onFinalResult(h: String?) {}
+        override fun onError(e: Exception?) { Log.e("Tadashi", "vosk error", e) }
+        override fun onTimeout() {}
+    }
+
+    private fun check(json: String?) {
+        if (json == null || busy) return
+        val t = try {
+            val o = JSONObject(json)
+            o.optString("partial", o.optString("text", ""))
+        } catch (e: Exception) { "" }
+        val s = t.replace(" ", "").lowercase()
+        if (s.isNotEmpty() && wakeWords.any { s.contains(it) }) onWake()
+    }
+
     private fun startWake() {
-        if (wake != null || busy) return
-        val key = Prefs.get(this, "pv_key")
-        val ppn = File(filesDir, "tadashi.ppn")
-        if (key.isBlank() || !ppn.exists()) {
-            Log.w("Tadashi", "Picovoice key or tadashi.ppn missing")
+        if (speech != null || busy || loading) return
+        val dir = File(filesDir, "vosk-model")
+        if (!File(dir, "am").exists()) {
+            Log.w("Tadashi", "wake-word model not downloaded yet")
             return
         }
-        try {
-            wake = PorcupineManager.Builder()
-                .setAccessKey(key)
-                .setKeywordPath(ppn.absolutePath)
-                .setSensitivity(0.7f)
-                .build(applicationContext, PorcupineManagerCallback { _ -> onWake() })
-            wake?.start()
-        } catch (e: Exception) {
-            Log.e("Tadashi", "wake word failed", e)
-            wake = null
-        }
+        loading = true
+        Thread {
+            try {
+                if (model == null) model = Model(dir.absolutePath)
+                main.post {
+                    try {
+                        if (busy || speech != null) return@post
+                        val r = Recognizer(model, 16000.0f)
+                        val s = SpeechService(r, 16000.0f)
+                        s.startListening(wakeListener)
+                        rec = r
+                        speech = s
+                    } catch (e: Exception) {
+                        Log.e("Tadashi", "wake start failed", e)
+                    } finally {
+                        loading = false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Tadashi", "model load failed", e)
+                loading = false
+            }
+        }.start()
     }
 
     private fun stopWake() {
-        try { wake?.stop(); wake?.delete() } catch (e: Exception) { }
-        wake = null
+        try { speech?.stop() } catch (e: Exception) { }
+        try { speech?.shutdown() } catch (e: Exception) { }
+        try { rec?.close() } catch (e: Exception) { }
+        speech = null
+        rec = null
     }
 
     private fun onWake() {

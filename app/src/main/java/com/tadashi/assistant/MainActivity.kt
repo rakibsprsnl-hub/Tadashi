@@ -3,11 +3,9 @@ package com.tadashi.assistant
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
-import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -15,10 +13,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.zip.ZipInputStream
 
 class MainActivity : Activity() {
     private lateinit var geminiKey: EditText
-    private lateinit var pvKey: EditText
+    private lateinit var status: TextView
 
     private fun btn(t: String, f: () -> Unit) = Button(this).apply {
         text = t
@@ -27,38 +28,30 @@ class MainActivity : Activity() {
 
     private fun label(t: String) = TextView(this).apply { text = t; setPadding(0, 28, 0, 4) }
 
+    private fun modelReady() = File(filesDir, "vosk-model/am").exists()
+
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 40, 40, 80) }
         col.addView(TextView(this).apply { text = "Tadashi"; textSize = 28f })
 
-        col.addView(label("1. Free Gemini API key (aistudio.google.com)"))
+        col.addView(label("1. Free Gemini API key (aistudio.google.com/apikey)"))
         geminiKey = EditText(this).apply {
             hint = "AIza..."; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setText(Prefs.get(this@MainActivity, "gemini_key"))
         }
         col.addView(geminiKey)
-
-        col.addView(label("2. Picovoice AccessKey (for the wake word)"))
-        pvKey = EditText(this).apply {
-            hint = "AccessKey"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setText(Prefs.get(this@MainActivity, "pv_key"))
-        }
-        col.addView(pvKey)
-        col.addView(btn("Save keys") {
+        col.addView(btn("Save key") {
             Prefs.set(this, "gemini_key", geminiKey.text.toString().trim())
-            Prefs.set(this, "pv_key", pvKey.text.toString().trim())
             toast("Saved")
         })
 
-        col.addView(label("3. Wake word file (Tadashi_android.ppn from console.picovoice.ai)"))
-        col.addView(btn("Choose Tadashi .ppn file") {
-            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
-            }, 11)
-        })
+        col.addView(label("2. Wake-word model (free, offline, about 40 MB, needs internet once)"))
+        status = TextView(this).apply { text = if (modelReady()) "Model ready" else "Model not downloaded yet" }
+        col.addView(status)
+        col.addView(btn("Download wake-word model") { downloadModel() })
 
-        col.addView(label("4. Permissions"))
+        col.addView(label("3. Permissions"))
         col.addView(btn("Grant mic / calls / contacts / SMS") {
             requestPermissions(arrayOf(
                 Manifest.permission.RECORD_AUDIO, Manifest.permission.CALL_PHONE,
@@ -75,9 +68,9 @@ class MainActivity : Activity() {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         })
 
-        col.addView(label("5. Start"))
-        col.addView(btn("Start Tadashi") {
-            startForegroundService(Intent(this, AssistantService::class.java))
+        col.addView(label("4. Start"))
+        col.addView(btn("Start / restart Tadashi") {
+            startForegroundService(Intent(this, AssistantService::class.java).setAction("RESTART_WAKE"))
             toast("Tadashi started. Say her name.")
         })
 
@@ -92,16 +85,36 @@ class MainActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(col) })
     }
 
-    override fun onActivityResult(r: Int, res: Int, d: Intent?) {
-        super.onActivityResult(r, res, d)
-        if (r == 11 && res == RESULT_OK) {
-            d?.data?.let { uri: Uri ->
-                contentResolver.openInputStream(uri)?.use { i ->
-                    File(filesDir, "tadashi.ppn").outputStream().use { o -> i.copyTo(o) }
+    private fun downloadModel() {
+        status.text = "Downloading... keep this screen open"
+        Thread {
+            try {
+                val dir = File(filesDir, "vosk-model")
+                dir.deleteRecursively()
+                dir.mkdirs()
+                val c = URL("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip")
+                    .openConnection() as HttpURLConnection
+                c.connectTimeout = 20000
+                c.readTimeout = 60000
+                ZipInputStream(c.inputStream).use { z ->
+                    var e = z.nextEntry
+                    while (e != null) {
+                        val name = e.name.substringAfter('/')
+                        if (name.isNotEmpty() && !name.contains("..")) {
+                            val f = File(dir, name)
+                            if (e.isDirectory) f.mkdirs() else {
+                                f.parentFile?.mkdirs()
+                                f.outputStream().use { o -> z.copyTo(o) }
+                            }
+                        }
+                        e = z.nextEntry
+                    }
                 }
-                toast("Wake word file saved")
+                runOnUiThread { status.text = "Model ready. Tap Start / restart Tadashi." }
+            } catch (ex: Exception) {
+                runOnUiThread { status.text = "Download failed: ${ex.message}" }
             }
-        }
+        }.start()
     }
 
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
